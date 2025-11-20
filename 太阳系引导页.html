@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式太阳系引导页</title>
+    <!-- 音乐播放器样式 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer/dist/APlayer.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Noto+Sans+SC:wght@300;400;700&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Noto Sans SC', 'Rajdhani', sans-serif;
+            color: #e2e8f0;
+        }
+
+        /* 优化：移除高耗能的 SVG feTurbulence 滤镜 
+           改为使用 base64 静态噪点图片平铺，大幅降低 CPU/GPU 占用
+        */
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0.07; /* 稍微增加一点不透明度以补偿 */
+            background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyBAMAAADsEZWCAAAAGFBMVEUAAAA5OTkAAABERERmZmYzMzOZmZlEREQncQlOAAAACHRSTlMAMwA3MzMzM7O0s1EAAABcSURBVDjLxZFJDsAgDAUxCwRY//9j6QshVRt16glWYk9iYpKStz70YfbD7Puw+z7s/h92f7I+9L4Pu+/D7vuw+z7s/mR96H0fdj/Mvg+778Pu+7D7Puz+ZH3ofR92P8x+H3bfh933Yfd92P1C7wftx1d+3gAAAABJRU5ErkJggg==");
+        }
+
+        /* 扫描线效果 */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 49;
+        }
+
+        .mono-font {
+            font-family: 'Space Mono', monospace;
+        }
+
+        .fade-in {
+            animation: fadeIn 2s ease-out forwards;
+            opacity: 0;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        .hud-border {
+            border: 1px solid rgba(0, 243, 255, 0.3);
+            background: rgba(0, 20, 30, 0.4);
+            backdrop-filter: blur(4px);
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px rgba(0, 243, 255, 0.5), 0 0 10px rgba(0, 243, 255, 0.3);
+        }
+        
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        /* 优化 APlayer 样式，使其更符合科技风格 */
+        .aplayer {
+            background: rgba(0, 20, 30, 0.8) !important;
+            border: 1px solid rgba(0, 243, 255, 0.2) !important;
+            color: #e2e8f0 !important;
+            font-family: 'Noto Sans SC', sans-serif !important;
+            z-index: 1000 !important; /* 确保层级正确 */
+        }
+        .aplayer .aplayer-info .aplayer-music .aplayer-title {
+            color: #00f3ff !important;
+        }
+        .aplayer .aplayer-list ol li:hover {
+            background: rgba(0, 243, 255, 0.1) !important;
+        }
+        .aplayer .aplayer-list ol li.aplayer-list-light {
+            background: rgba(0, 243, 255, 0.2) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 音乐播放器组件 (Fixed定位) -->
+    <div class="aplayer" data-id="2440040711" data-server="netease" data-type="playlist" data-fixed="true" data-autoplay="true" data-volume="0.35" ></div>
+
+    <!-- 视觉特效层 -->
+    <div class="noise-overlay"></div>
+    <div class="scanlines"></div>
+
+    <!-- HUD 界面层：增加 pb-24 避开左下角的播放器 -->
+    <div class="relative z-10 w-full h-screen pointer-events-none p-6 pb-24 flex flex-col justify-between">
+        
+        <!-- 顶部导航 -->
+        <header class="flex justify-between items-start fade-in">
+            <div class="flex flex-col">
+                <h1 class="text-4xl font-bold tracking-widest uppercase neon-text">太阳系</h1>
+                <span class="text-xs mono-font text-cyan-400 mt-1 tracking-[0.3em]">交互式 3D 可视化 // V.2.1.1 (BGM)</span>
+            </div>
+            <div class="hud-border px-4 py-2 rounded-sm">
+                <div class="flex items-center gap-3">
+                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span class="mono-font text-xs text-cyan-200">系统状态: 性能优化</span>
+                </div>
+                <div class="flex justify-between mt-1 text-[10px] text-gray-400 mono-font">
+                    <span>FPS: <span id="fps-counter">60</span></span>
+                    <span>LAT: <span id="lat-disp">00.00</span></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 侧边数据栏 (左) -->
+        <aside class="absolute left-6 top-1/2 -translate-y-1/2 hidden md:flex flex-col gap-4 w-64 fade-in" style="animation-delay: 0.5s;">
+            <div class="hud-border p-4 border-l-4 border-l-cyan-500">
+                <h3 class="text-sm text-gray-400 tracking-widest mb-2 uppercase">当前目标</h3>
+                <h2 class="text-2xl font-bold text-white neon-text" id="planet-name">太阳系</h2>
+                <p class="text-xs text-gray-300 mt-2 leading-relaxed" id="planet-desc">
+                    监测系统活动。将鼠标悬停在行星体上以进行详细分析。
+                </p>
+                <div class="mt-4 pt-4 border-t border-gray-700 grid grid-cols-2 gap-2">
+                    <div>
+                        <div class="text-[10px] text-gray-500 uppercase">半径</div>
+                        <div class="text-sm mono-font text-cyan-300" id="planet-radius">---</div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] text-gray-500 uppercase">温度</div>
+                        <div class="text-sm mono-font text-cyan-300" id="planet-temp">---</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 底部控制栏 -->
+        <footer class="flex justify-between items-end fade-in pointer-events-auto" style="animation-delay: 1s;">
+            <div class="flex flex-col gap-1">
+                <div class="text-[10px] text-gray-500 mono-font mb-1">导航控制</div>
+                <div class="flex gap-2">
+                    <button id="btn-reset" class="hud-border px-4 py-2 text-xs hover:bg-cyan-900/50 transition-colors text-cyan-200 uppercase tracking-wider">重置视图</button>
+                    <button id="btn-speed" class="hud-border px-4 py-2 text-xs hover:bg-cyan-900/50 transition-colors text-cyan-200 uppercase tracking-wider">切换速度</button>
+                </div>
+            </div>
+            
+            <div class="flex flex-col gap-1 items-end">
+                <button id="btn-guyanxing" class="hud-border px-4 py-2 text-xs hover:bg-purple-900/50 transition-colors text-purple-300 uppercase tracking-wider neon-text" style="text-shadow: 0 0 5px rgba(160, 0, 255, 0.5), 0 0 10px rgba(160, 0, 255, 0.3);">百度一下</button>
+                <div class="w-32 h-1 bg-gray-800 mt-2 overflow-hidden">
+                    <div class="h-full bg-cyan-500 animate-[width_3s_ease-in-out_infinite]" style="width: 45%"></div>
+                </div>
+                <p class="text-[10px] text-gray-600 mono-font">由 THREE.JS 渲染</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 3D 画布 -->
+    <div id="canvas-container"></div>
+
+    <!-- 音乐播放器脚本 -->
+    <script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/meting@1.2.0/dist/Meting.min.js"></script>
+
+    <!-- Three.js Logic -->
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+        import { EffectComposer } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            sunColor: 0xffaa00,
+            orbitColor: 0x223344,
+            orbitActiveColor: 0x00f3ff,
+            bgColor: 0x050505,
+            speed: 1
+        };
+
+        // Planet Data
+        const PLANETS = [
+            { name: "水星", color: 0xA5A5A5, size: 2, dist: 25, speed: 0.04, desc: "最小的行星，离太阳最近。", radius: "2,439 公里", temp: "440 K" },
+            { name: "金星", color: 0xFFC649, size: 3.5, dist: 35, speed: 0.015, desc: "第二颗行星。炎热，大气层浓密。", radius: "6,051 公里", temp: "737 K" },
+            { name: "地球", color: 0x2255FF, size: 3.8, dist: 50, speed: 0.01, desc: "我们的家园。唯一已知存在生命的行星。", radius: "6,371 公里", temp: "288 K" },
+            { name: "火星", color: 0xFF4500, size: 2.5, dist: 65, speed: 0.008, desc: "红色行星。尘土飞扬且寒冷。", radius: "3,389 公里", temp: "210 K" },
+            { name: "木星", color: 0xE0AE6F, size: 8, dist: 90, speed: 0.004, desc: "气态巨行星。最大的行星。", radius: "69,911 公里", temp: "165 K" },
+            { name: "土星", color: 0xF4D03F, size: 7, dist: 120, speed: 0.003, desc: "以其行星环系统而闻名。", radius: "58,232 公里", temp: "134 K", hasRing: true },
+            { name: "天王星", color: 0x4FD0E7, size: 5, dist: 150, speed: 0.002, desc: "冰巨星。横向旋转。", radius: "25,362 公里", temp: "76 K" },
+            { name: "海王星", color: 0x3344FF, size: 4.8, dist: 180, speed: 0.001, desc: "多风、黑暗、寒冷。", radius: "24,622 公里", temp: "72 K" },
+        ];
+
+        // --- Init Scene ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(CONFIG.bgColor);
+        scene.fog = new THREE.FogExp2(CONFIG.bgColor, 0.002); 
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(60, 40, 80);
+
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            powerPreference: "high-performance" // 提示浏览器使用高性能模式
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // 优化：限制像素比，避免在 4K 或视网膜屏幕上渲染负担过重
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 300;
+        controls.minDistance = 20;
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.PointLight(0xffffff, 2, 400);
+        scene.add(sunLight);
+
+        // --- Post Processing (Bloom) ---
+        // 优化：使用 half-resolution 渲染目标（虽然这里库不支持直接配置，但通过 pixelRatio 已经间接优化）
+        const renderScene = new RenderPass(scene, camera);
+        
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.1; // 稍微提高阈值，只让真正亮的地方发光，减少计算
+        bloomPass.strength = 1.2; // 稍微降低强度
+        bloomPass.radius = 0.5;
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- Objects ---
+        const sunGeometry = new THREE.SphereGeometry(8, 64, 64);
+        const sunMaterial = new THREE.MeshBasicMaterial({ color: CONFIG.sunColor });
+        const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+        sun.userData = {
+            name: "太阳",
+            desc: "太阳系的中心恒星。几乎所有的质量都集中在这里。",
+            radius: "696,340 公里",
+            temp: "5,778 K"
+        };
+        scene.add(sun);
+
+        const sunGlowGeo = new THREE.SphereGeometry(8.2, 32, 32);
+        const sunGlowMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.3 });
+        const sunGlow = new THREE.Mesh(sunGlowGeo, sunGlowMat);
+        scene.add(sunGlow);
+
+        const planetMeshes = [];
+
+        PLANETS.forEach((data) => {
+            const planetGroup = new THREE.Group();
+            
+            // 优化：减少轨道线的段数，从 128 降到 64，肉眼很难看出区别但性能更好
+            const orbitGeo = new THREE.RingGeometry(data.dist - 0.1, data.dist + 0.1, 64);
+            orbitGeo.rotateX(-Math.PI / 2);
+            const orbitMat = new THREE.MeshBasicMaterial({ 
+                color: CONFIG.orbitColor, 
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.3
+            });
+            const orbit = new THREE.Mesh(orbitGeo, orbitMat);
+            scene.add(orbit);
+
+            const geometry = new THREE.SphereGeometry(data.size, 32, 32);
+            const material = new THREE.MeshStandardMaterial({
+                color: data.color,
+                roughness: 0.7,
+                metalness: 0.1,
+            });
+            
+            const planet = new THREE.Mesh(geometry, material);
+            planet.userData = data;
+            planet.position.x = data.dist;
+            planetGroup.add(planet);
+
+            if (data.hasRing) {
+                const ringGeo = new THREE.RingGeometry(data.size * 1.4, data.size * 2.2, 64);
+                ringGeo.rotateX(-Math.PI / 2);
+                const ringMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xAA8866, 
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.position.x = data.dist;
+                planet.add(ring);
+                ring.position.set(0,0,0);
+                ring.rotation.x = 0.4;
+            }
+
+            scene.add(planetGroup);
+            planetMeshes.push({ mesh: planet, group: planetGroup, data: data, angle: Math.random() * Math.PI * 2 });
+        });
+
+        // Starfield
+        const starsGeometry = new THREE.BufferGeometry();
+        const starsCount = 2000; // 稍微减少星星数量
+        const posArray = new Float32Array(starsCount * 3);
+        for(let i = 0; i < starsCount * 3; i++) {
+            posArray[i] = (Math.random() - 0.5) * 600;
+        }
+        starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        const starsMaterial = new THREE.PointsMaterial({
+            size: 0.5,
+            color: 0x00f3ff,
+            transparent: true,
+            opacity: 0.6,
+            sizeAttenuation: true
+        });
+        const stars = new THREE.Points(starsGeometry, starsMaterial);
+        scene.add(stars);
+
+        // --- Interaction ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let INTERSECTED;
+
+        function onMouseMove( event ) {
+            event.preventDefault();
+            mouse.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+            mouse.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+        }
+        window.addEventListener( 'mousemove', onMouseMove, false );
+
+        const uiElements = {
+            name: document.getElementById('planet-name'),
+            desc: document.getElementById('planet-desc'),
+            radius: document.getElementById('planet-radius'),
+            temp: document.getElementById('planet-temp'),
+            lat: document.getElementById('lat-disp'),
+            fps: document.getElementById('fps-counter')
+        };
+
+        function updateUI(data) {
+            if (!data || !data.name) {
+                uiElements.name.innerText = "太阳系";
+                uiElements.desc.innerText = "监测系统活动。将鼠标悬停在行星体上以进行详细分析。";
+                uiElements.radius.innerText = "---";
+                uiElements.temp.innerText = "---";
+                return;
+            }
+            uiElements.name.innerText = data.name.toUpperCase();
+            uiElements.desc.innerText = data.desc;
+            uiElements.radius.innerText = data.radius;
+            uiElements.temp.innerText = data.temp;
+        }
+
+        // --- Animation Loop ---
+        let time = 0;
+        let isSpeedActive = false;
+        let lastTime = performance.now();
+        let frames = 0;
+
+        document.getElementById('btn-speed').addEventListener('click', () => {
+            isSpeedActive = !isSpeedActive;
+            CONFIG.speed = isSpeedActive ? 5 : 1;
+        });
+
+        document.getElementById('btn-reset').addEventListener('click', () => {
+            controls.reset();
+            camera.position.set(60, 40, 80);
+        });
+
+        document.getElementById('btn-guyanxing').addEventListener('click', () => {
+            window.open('https://www.baidu.com', '_blank');
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // FPS Counter
+            frames++;
+            const now = performance.now();
+            if (now - lastTime >= 1000) {
+                uiElements.fps.innerText = frames;
+                frames = 0;
+                lastTime = now;
+            }
+
+            time += 0.005 * CONFIG.speed;
+            stars.rotation.y = time * 0.02;
+
+            planetMeshes.forEach((obj) => {
+                obj.angle += obj.data.speed * CONFIG.speed * 0.5;
+                obj.mesh.position.x = Math.cos(obj.angle) * obj.data.dist;
+                obj.mesh.position.z = Math.sin(obj.angle) * obj.data.dist;
+                obj.mesh.rotation.y += 0.01;
+            });
+
+            const lat = (camera.rotation.x * (180/Math.PI)).toFixed(2);
+            uiElements.lat.innerText = lat;
+
+            // Raycasting
+            raycaster.setFromCamera( mouse, camera );
+            const objectsToTest = [...planetMeshes.map(p => p.mesh), sun];
+            const intersects = raycaster.intersectObjects( objectsToTest, false );
+
+            if ( intersects.length > 0 ) {
+                if ( INTERSECTED != intersects[ 0 ].object ) {
+                    // 修复：只在材质支持 emissive 时尝试重置颜色 (防止太阳报错)
+                    if ( INTERSECTED && INTERSECTED.material.emissive ) {
+                        INTERSECTED.material.emissive.setHex( INTERSECTED.currentHex );
+                    }
+                    
+                    INTERSECTED = intersects[ 0 ].object;
+
+                    // 修复：只在材质支持 emissive 时尝试设置高亮颜色
+                    if ( INTERSECTED.material.emissive ) {
+                        INTERSECTED.currentHex = INTERSECTED.material.emissive.getHex();
+                        INTERSECTED.material.emissive.setHex( 0x333333 );
+                    }
+                    
+                    updateUI(INTERSECTED.userData);
+                    document.body.style.cursor = 'pointer';
+                }
+            } else {
+                if ( INTERSECTED ) {
+                    // 修复：只在材质支持 emissive 时尝试重置颜色
+                    if ( INTERSECTED.material.emissive ) {
+                        INTERSECTED.material.emissive.setHex( INTERSECTED.currentHex );
+                    }
+                    updateUI(null);
+                } 
+                INTERSECTED = null;
+                document.body.style.cursor = 'default';
+            }
+
+            controls.update();
+            composer.render();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            // 确保 Resize 时也保持性能优化设置
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
